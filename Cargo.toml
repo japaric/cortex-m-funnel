@@ -1,0 +1,12 @@
+[package]
+authors = ["Jorge Aparicio <jorge@japaric.io>"]
+edition = "2018"
+name = "cortex-m-funnel"
+version = "0.1.0-alpha.0"
+
+[lib]
+name = "funnel"
+
+[dependencies]
+cortex-m-funnel-macros = { path = "macros" }
+ufmt = "0.1.0"
