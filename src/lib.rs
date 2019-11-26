@@ -34,8 +34,11 @@
 //!
 //! // `NVIC_PRIO_BITS` is the number of priority bits supported by the device
 //! //
+//! // The `NVIC_PRIO_BITS` value can be a literal integer (e.g. `3`) or a path to a constant
+//! // (`stm32f103xx::NVIC_PRIO_BITS`)
+//! //
 //! // This macro call can only appear *once* in the dependency graph and *must* appear if
-//! // the // `flog!` macro or the `Logger::get()` API is used anywhere in the dependency graph
+//! // the `flog!` macro or the `Logger::get()` API is used anywhere in the dependency graph
 //! funnel!(NVIC_PRIO_BITS = 3, {
 //!      // syntax: $logical_priority : $ring_buffer_size_in_bytes
 //!      // to get better performance use sizes that are a power of 2

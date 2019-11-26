@@ -11,7 +11,7 @@ use syn::{
     parse::{self, Parse, ParseStream},
     parse_macro_input,
     punctuated::Punctuated,
-    token, Ident, LitInt, Token,
+    token, Ident, LitInt, Path, Token,
 };
 
 #[proc_macro]
@@ -32,10 +32,20 @@ fn main(input: Input) -> parse::Result<TokenStream> {
         ));
     }
 
-    let bits: u8 = lit2ux(&input.bits, Some(1..=8))?;
+    let (bits, upper) = match input.bits {
+        Either::Left(bits) => {
+            let bits = lit2ux::<u8>(&bits, Some(1..=8))?;
+            (Either::Left(bits), 1 << bits)
+        }
+
+        Either::Right(path) => {
+            (Either::Right(path), 255)
+        }
+    };
+
     let mut map = BTreeMap::new();
     for kv in &input.map {
-        let k = lit2ux(&kv.priority, Some(1..=bits))?;
+        let k = lit2ux(&kv.priority, Some(1..=upper))?;
         let v: usize = lit2ux(&kv.size, Some(1..=usize::max_value()))?;
 
         if map.contains_key(&k) {
@@ -54,9 +64,23 @@ fn main(input: Input) -> parse::Result<TokenStream> {
     for (prio, size) in &map {
         let l = logger_ident(*prio);
 
-        loggers.push(quote!(static #l: funnel::Inner<[u8; #size]> = funnel::Inner::new([0; #size]);));
-        let nvic_prio = ((1 << bits) - prio) << (8 - bits);
+        loggers
+            .push(quote!(static #l: funnel::Inner<[u8; #size]> = funnel::Inner::new([0; #size]);));
+        let (const_, nvic_prio) = match bits {
+            Either::Left(bits) => {
+                let nvic_prio = ((1 << bits) - prio) << (8 - bits);
+                (None, quote!(#nvic_prio))
+            }
+
+            Either::Right(ref path) => {
+                let px = priority_ident(*prio);
+                let const_ = quote!(const #px: u8 = ((1 << #path) - #prio) << (8 - #path););
+                (Some(const_), quote!(#px))
+            }
+        };
+
         ifs.push(quote!(
+            #const_
             if nvic_prio == #nvic_prio {
                 return Some(&#l);
             }
@@ -92,6 +116,10 @@ fn logger_ident(prio: u8) -> Ident {
     Ident::new(&format!("L{}", prio), Span::call_site())
 }
 
+fn priority_ident(prio: u8) -> Ident {
+    Ident::new(&format!("P{}", prio), Span::call_site())
+}
+
 fn lit2ux<T>(lit: &LitInt, range: Option<RangeInclusive<T>>) -> parse::Result<T>
 where
     T: Copy + Display + FromStr + PartialOrd<T>,
@@ -118,10 +146,27 @@ where
     Ok(n)
 }
 
+enum Either<A, B> {
+    Left(A),
+    Right(B),
+}
+
+fn parse_either<A, B>(input: ParseStream) -> parse::Result<Either<A, B>>
+where
+    A: Parse,
+    B: Parse,
+{
+    if let Ok(a) = input.parse() {
+        Ok(Either::Left(a))
+    } else {
+        Ok(Either::Right(input.parse()?))
+    }
+}
+
 struct Input {
     nvic_prio_bits: Ident,
     _eq: Token![=],
-    bits: LitInt,
+    bits: Either<LitInt, Path>,
     _comma: Token![,],
     _brace: token::Brace,
     map: Punctuated<KeyValue, Token![,]>,
@@ -133,7 +178,7 @@ impl Parse for Input {
         Ok(Self {
             nvic_prio_bits: input.parse()?,
             _eq: input.parse()?,
-            bits: input.parse()?,
+            bits: parse_either(input)?,
             _comma: input.parse()?,
             _brace: braced!(content in input),
             map: Punctuated::parse_terminated(&content)?,
