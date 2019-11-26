@@ -10,3 +10,10 @@ name = "funnel"
 [dependencies]
 cortex-m-funnel-macros = { path = "macros" }
 ufmt = "0.1.0"
+
+[profile.release]
+codegen-units = 1
+lto = true
+
+[workspace]
+members = ["example"]

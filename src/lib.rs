@@ -30,6 +30,10 @@
 //! Application crate:
 //!
 //! ``` ignore
+//! // aligned = "0.3.2"
+//! use aligned::Aligned;
+//! use cortex_m::itm;
+//!
 //! use funnel::{Drain, flog, funnel};
 //!
 //! // `NVIC_PRIO_BITS` is the number of priority bits supported by the device
@@ -56,11 +60,22 @@
 //!
 //!     let drains = Drain::get_all();
 //!
+//!     let mut buf = Aligned([0; 32]); // 4-byte aligned buffer
 //!     loop {
-//!         for (i, drain) in drains.iter().cloned().enumerate() {
-//!             for byte in drain {
-//!                 // NOTE better throughput can be obtained with `write_u32`
-//!                 itm.stim[i].write_u8(byte);
+//!         for (i, drain) in drains.iter().enumerate() {
+//!             'l: loop {
+//!                 let n = drain.read(&mut buf).len();
+//!
+//!                 // this drain is empty
+//!                 if n == 0 {
+//!                     break 'l;
+//!                 }
+//!
+//!                 // we need this coercion or the slicing below won't do the right thing
+//!                 let buf: &Aligned<_, [_]> = &buf;
+//!
+//!                 // will send data in 32-bit chunks
+//!                 itm::write_aligned(&mut itm.stim[i], &buf[..n]);
 //!             }
 //!         }
 //!     }
@@ -140,7 +155,7 @@
 
 use core::{
     cell::UnsafeCell,
-    ptr,
+    cmp, ptr,
     sync::atomic::{self, AtomicUsize, Ordering},
 };
 
@@ -231,7 +246,7 @@ impl Logger {
     }
 
     // This function is *non*-reentrant but `Logger` is `!Sync` so each `Logger`s is constrained to
-    // a single priority level (therefore no preemption / over can occur on any single `Logger`
+    // a single priority level (therefore no preemption / overlap can occur on any single `Logger`
     // instance)
     fn log(&self, s: &str) -> Result<(), ()> {
         unsafe {
@@ -257,7 +272,7 @@ impl Logger {
 
             if blen >= ilen + (*write).wrapping_sub(read) {
                 // FIXME (?) this is *not* always optimized to a right shift (`lsr`) when `blen` is
-                // a power of 2 -- instead we get an `udiv` which is slower.
+                // a power of 2 -- instead we get an `udiv` which is slower (?).
                 let w = *write % blen;
 
                 // NOTE we use `ptr::copy_nonoverlapping` instead of `copy_from_slice` to avoid
@@ -334,28 +349,25 @@ impl Drain {
 
         unsafe { __funnel_drains() }
     }
-}
 
-impl Iterator for Drain {
-    type Item = u8;
-
+    /// Copies the contents of the `Logger` ring buffer into the given buffer
     // NOTE this is basically `heapless::spsc::Consumer::dequeue`
-    fn next(&mut self) -> Option<u8> {
+    pub fn read<'b>(&self, buf: &'b mut [u8]) -> &'b [u8] {
         unsafe {
-            let readf: *const AtomicUsize = self.inner.read.get() as *const _;
+            // NOTE we use `UnsafeCell` instead of `AtomicUsize` because we want the unique
+            // reference (`&mut-`) semantics; this drain has exclusive access to the `read`
+            // pointer for the duration of this function call
+            let readf = &mut *self.inner.read.get();
             let writef: *const AtomicUsize = self.inner.write.get() as *const _;
-            let n = (*self.inner.buffer.get()).len();
+            let blen = (*self.inner.buffer.get()).len();
             let p = (*self.inner.buffer.get()).as_ptr();
 
             // early exit to hint the compiler that `n` is not `0`
-            if n == 0 {
-                return None;
+            if blen == 0 {
+                return &[];
             }
 
-            let read = (*readf).load(Ordering::Relaxed);
-
-            // actually `Ordering::Acquire` minus the DMB (Data Memory Barrier) -- we still need a
-            // compiler barrier
+            let read = *readf;
             // XXX on paper, this is insta-UB because `Logger::log` has a unique reference
             // (`&mut-`) to the `write` field and this operation require a shared reference (`&-`)
             // to the same field. At runtime, this load is atomic (happens in a single instruction)
@@ -368,17 +380,45 @@ impl Iterator for Drain {
             let write = (*writef).load(Ordering::Relaxed);
             atomic::compiler_fence(Ordering::Acquire); // ▼
 
-            if read != write {
+            if write > read {
+                // number of bytes to copy
+                let c = cmp::min(buf.len(), write.wrapping_sub(read));
                 // FIXME (?) this is *not* always optimized to a right shift (`lsr`) when `n` is
                 // a power of 2 -- instead we get an `udiv` which is slower.
-                let byte = p.add(read % n).read();
+                let r = read % blen;
+
+                // NOTE we use `ptr::copy_nonoverlapping` instead of `copy_from_slice` to avoid
+                // panicking branches
+                if r + c > blen {
+                    // two memcpy-s
+                    let mid = blen - r;
+                    // buf[..mid].copy_from_slice(&buffer[r..]);
+                    ptr::copy_nonoverlapping(p.add(r), buf.as_mut_ptr(), mid);
+                    // buf[mid..mid + c].copy_from_slice(&buffer[..c - mid]);
+                    ptr::copy_nonoverlapping(p, buf.as_mut_ptr().add(mid), c - mid);
+                } else {
+                    // single memcpy
+                    // buf[..c].copy_from_slice(&buffer[r..r + c]);
+                    ptr::copy_nonoverlapping(p.add(r), buf.as_mut_ptr(), c);
+                }
+
                 atomic::compiler_fence(Ordering::Release); // ▲
-                (*readf).store(read.wrapping_add(1), Ordering::Relaxed);
-                Some(byte)
+                *readf = (*readf).wrapping_add(c);
+
+                // &buf[..c]
+                buf.get_unchecked(..c)
             } else {
-                None
+                &[]
             }
         }
+    }
+}
+
+impl Iterator for Drain {
+    type Item = u8;
+
+    fn next(&mut self) -> Option<u8> {
+        self.read(&mut [0]).first().cloned()
     }
 }
 
@@ -421,6 +461,27 @@ mod tests {
         assert_eq!(drain.next(), Some(b'C'));
         assert_eq!(drain.next(), Some(b'D'));
         assert_eq!(drain.next(), None);
+    }
+
+    #[test]
+    fn read() {
+        static INNER: Inner<[u8; 16]> = Inner::new([0; 16]);
+
+        let inner = &INNER;
+        let logger = Logger { inner };
+        let drain = Drain { inner };
+
+        let mut buf = [0; 8];
+        logger.log("Hello, world!").unwrap();
+        assert_eq!(drain.read(&mut buf), b"Hello, w");
+        assert_eq!(drain.read(&mut buf), b"orld!");
+        assert_eq!(drain.read(&mut buf), b"");
+
+        // NOTE the ring buffer will wrap around with this operation
+        logger.log("Hello, world!").unwrap();
+        assert_eq!(drain.read(&mut buf), b"Hello, w");
+        assert_eq!(drain.read(&mut buf), b"orld!");
+        assert_eq!(drain.read(&mut buf), b"");
     }
 
     #[test]
