@@ -56,7 +56,7 @@
 //! #[entry]
 //! fn main() -> ! {
 //!     // ..
-//!     let itm: ITM = /* .. */;
+//!     let mut itm: ITM = /* .. */;
 //!
 //!     let drains = Drain::get_all();
 //!
