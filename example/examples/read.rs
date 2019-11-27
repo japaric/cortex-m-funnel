@@ -4,10 +4,9 @@
 use aligned::Aligned;
 use cortex_m::{itm, peripheral::NVIC};
 use cortex_m_rt::entry;
-use funnel::{flog, funnel, Drain, Logger};
+use funnel::{funnel, info, Drain};
 use lm3s6965::{interrupt, Interrupt};
 use panic_never as _;
-use ufmt::uwrite;
 
 funnel!(NVIC_PRIO_BITS = 3, {
     1: 32,
@@ -55,18 +54,10 @@ fn main() -> ! {
 
 #[interrupt]
 fn GPIOA() {
-    if let Some(mut logger) = Logger::get() {
-        uwrite!(logger, "A").ok();
-    }
-
-    flog!("B").ok();
+    info!("GPIOA").ok();
 }
 
 #[interrupt]
 fn GPIOB() {
-    if let Some(mut logger) = Logger::get() {
-        uwrite!(logger, "C").ok();
-    }
-
-    flog!("D").ok();
+    info!("GPIOB").ok();
 }

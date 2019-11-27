@@ -6,7 +6,7 @@
 there's no spinning (e.g. CAS loop) to get a handle; and block-free as in the
 logger never waits for an I/O transfer (e.g. ITM, UART, etc.) to complete)
 
-Status: ☢️ **Experimental** ☢️
+Status: ☢️ **Experimental** ☢️ (ALPHA PRE-RELEASE)
 
 ## [Documentation](https://japaric.github.io/cortex-m-funnel/funnel)
 

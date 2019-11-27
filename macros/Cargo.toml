@@ -2,12 +2,12 @@
 authors = ["Jorge Aparicio <jorge@japaric.io>"]
 edition = "2018"
 name = "cortex-m-funnel-macros"
-version = "0.1.0-alpha.0"
+version = "0.1.0-alpha.1"
 
 [lib]
 proc-macro = true
 
 [dependencies]
-syn = "1.0.8"
-quote = "1.0.2"
 proc-macro2 = "1.0.6"
+quote = "1.0.2"
+syn = "1.0.8"
