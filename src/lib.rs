@@ -206,8 +206,11 @@ impl Logger {
     /// Gets the `funnel` logger associated to the caller's priority level
     ///
     /// This returns `None` if no logger was associated to the priority level
-    // TODO cfg to only be available on ARM Cortex-M
     pub fn get() -> Option<Self> {
+        if cfg!(not(cortex_m)) {
+            return None;
+        }
+
         // Cortex-M MMIO registers
         const SCB_ICSR: *const u32 = 0xE000_ED04 as *const u32;
         const NVIC_IPR: *const u32 = 0xE000_E400 as *const u32;
@@ -339,6 +342,10 @@ pub struct Drain {
 impl Drain {
     /// The drain endpoint of each ring buffer, highest priority first
     pub fn get_all() -> &'static [Self] {
+        if cfg!(not(cortex_m)) {
+            return &[];
+        }
+
         // NOTE The expansion of `funnel!` declares `__funnel_drains` as a function with signature
         // `fn() -> &'static [&'static Inner<[u8]>]` so here we are implicitly transmuting `&'static
         // Inner<[u8]>` into `Drain` but this should be fine because they are equivalent due to
