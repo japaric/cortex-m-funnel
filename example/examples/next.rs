@@ -4,7 +4,7 @@
 use cortex_m::peripheral::NVIC;
 use cortex_m_rt::entry;
 use cortex_m_semihosting::{debug, hprintln};
-use funnel::{flog, funnel, Drain, Logger};
+use funnel::{info, funnel, Drain, Logger};
 use lm3s6965::{interrupt, Interrupt};
 use panic_halt as _;
 use ufmt::uwrite;
@@ -48,7 +48,7 @@ fn GPIOA() {
         uwrite!(logger, "A").ok();
     }
 
-    flog!("B").ok();
+    info!("B").ok();
 }
 
 #[interrupt]
@@ -57,5 +57,5 @@ fn GPIOB() {
         uwrite!(logger, "C").ok();
     }
 
-    flog!("D").ok();
+    info!("D").ok();
 }

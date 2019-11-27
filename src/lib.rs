@@ -4,7 +4,7 @@
 //! (e.g. CAS loop) to get a handle; and block-free as in the logger never waits for an I/O transfer
 //! (e.g. ITM, UART, etc.) to complete)
 //!
-//! Status: ☢️ **Experimental** ☢️
+//! Status: ☢️ **Experimental** ☢️ (ALPHA PRE-RELEASE)
 //!
 //! **SUPER IMPORTANT** Using this crate in a threaded environment will result in an unsound
 //! program! You have been warned! Also, multi-core support has not been thought out at all so this
@@ -34,15 +34,15 @@
 //! use aligned::Aligned;
 //! use cortex_m::itm;
 //!
-//! use funnel::{Drain, flog, funnel};
+//! use funnel::{Drain, funnel, info, trace};
 //!
 //! // `NVIC_PRIO_BITS` is the number of priority bits supported by the device
 //! //
 //! // The `NVIC_PRIO_BITS` value can be a literal integer (e.g. `3`) or a path to a constant
 //! // (`stm32f103xx::NVIC_PRIO_BITS`)
 //! //
-//! // This macro call can only appear *once* in the dependency graph and *must* appear if
-//! // the `flog!` macro or the `Logger::get()` API is used anywhere in the dependency graph
+//! // This macro call can only appear *once* in the dependency graph and *must* appear if any
+//! // of the `funnel` macros or the `Logger::get()` API is used anywhere in the dependency graph
 //! funnel!(NVIC_PRIO_BITS = 3, {
 //!      // syntax: $logical_priority : $ring_buffer_size_in_bytes
 //!      // to get better performance use sizes that are a power of 2
@@ -84,7 +84,7 @@
 //! // logical_priority = 1 (nvic_priority = 224)
 //! #[interrupt]
 //! fn GPIOA() {
-//!     flog!("GPIOA");
+//!     info!("GPIOA");
 //!     foo(0);
 //!     // ..
 //! }
@@ -92,34 +92,63 @@
 //! // logical_priority = 2 (nvic_priority = 192)
 //! #[interrupt]
 //! fn GPIOB() {
-//!     flog!("GPIOB");
+//!     info!("GPIOB");
 //!     foo(1);
 //!     // ..
 //! }
 //!
 //! fn foo(x: i32) {
 //!     // this macro can appear in libraries
-//!     flog!("foo({})", x);
+//!     trace!("foo({})", x);
 //!     // ..
 //! }
 //! ```
 //!
 //! ## `Logger`
 //!
-//! The overhead of each `flog!` call can be reduced using one of the `uwrite!` macros on a
+//! The overhead of each macro call can be reduced using one of the `uwrite!` macros on a
 //! `Logger`. A `Logger` can only be obtained using the `Logger::get()` constructor.
 //!
 //! ``` ignore
-//! use funnel::Logger;
+//! use funnel::{Logger, log_enabled};
 //!
 //! #[interrupt]
 //! fn GPIOC() {
 //!     if let Some(mut logger) = Logger::get() {
-//!          uwriteln!(logger, "{}", 100).ok();
-//!          uwriteln!(logger, "{:?}", some_value).ok();
+//!          if log_enabled!(Info) {
+//!              uwriteln!(logger, "{}", 100).ok();
+//!              uwriteln!(logger, "{:?}", some_value).ok();
+//!          }
 //!     }
 //! }
 //! ```
+//!
+//! # Logging levels
+//!
+//! `funnel` supports 5 logging level: Trace, Debug, Info, Warn and Error, sorted in increasing
+//! level of severity. Each of these logging level has an associated logging macro: `trace!`,
+//! `debug!`, `info!`, `warn!` and `error!`.
+//!
+//! Logs of *lesser* severity can be *statically* disabled using of these Cargo features.
+//!
+//! - `max_level_trace`
+//! - `max_level_debug`
+//! - `max_level_info`
+//! - `max_level_warn`
+//! - `max_level_error`
+//! - `max_level_off`
+//! - `release_max_level_trace`
+//! - `release_max_level_debug`
+//! - `release_max_level_info`
+//! - `release_max_level_warn`
+//! - `release_max_level_error`
+//! - `release_max_level_off`
+//!
+//! Enabling the `max_level_info` feature will disable the `Debug` and `Trace` logging levels;
+//! `max_level_off` will disable all logging levels. The `release_*` features apply when the
+//! application is compiled using the 'release' profile; the other features apply when the 'dev'
+//! profile is used. To check if a logging level is enabled or disabled in code use the
+//! `log_enabled!` macro.
 //!
 //! # Benchmarks
 //!
@@ -127,14 +156,14 @@
 //!
 //! | Code                         | Cycles  |
 //! |------------------------------|---------|
-//! | `flog!("")`                  | 36      |
+//! | `info!("")`                  | 36      |
 //! | `uwriteln!(logger, "")`      | 15      |
 //! | `drain("")`                  | 27      |
-//! | `flog!("{}", S)`             | 331-369 |
+//! | `info!("{}", S)`             | 331-369 |
 //! | `uwriteln!(logger, "{}", S)` | 308-346 |
 //! | `drain(S)`                   | 863-916 |
 //! | `iprintln!(_, "{}", S)`      | 1652    |
-//! | `flog!("{}", N)`             | 348-383 |
+//! | `info!("{}", N)`             | 348-383 |
 //! | `uwriteln!(logger, "{}", N)` | 329-364 |
 //! | `drain(N)`                   | 217-230 |
 //!
@@ -206,8 +235,17 @@ impl Logger {
     /// Gets the `funnel` logger associated to the caller's priority level
     ///
     /// This returns `None` if no logger was associated to the priority level
-    // TODO cfg to only be available on ARM Cortex-M
     pub fn get() -> Option<Self> {
+        if cfg!(not(cortex_m)) {
+            return None;
+        }
+
+        if (cfg!(debug_assertions) && cfg!(feature = "max_level_off"))
+            || cfg!(feature = "release_max_level_off")
+        {
+            return None;
+        }
+
         // Cortex-M MMIO registers
         const SCB_ICSR: *const u32 = 0xE000_ED04 as *const u32;
         const NVIC_IPR: *const u32 = 0xE000_E400 as *const u32;
@@ -312,13 +350,10 @@ impl uWrite for Logger {
     }
 }
 
-/// Logs a string
-///
-/// Syntax matches `println!`. You need to depend on the `ufmt` crate to use this macro.
-///
-/// NOTE a newline is always appended to the end
+/// IMPLEMENTATION DETAIL; DO NOT USE
+#[doc(hidden)]
 #[macro_export]
-macro_rules! flog {
+macro_rules! _flog {
     ($($tt:tt)*) => {{
         if let Some(mut logger) = $crate::Logger::get() {
             $crate::uwriteln!(logger, $($tt)*)
@@ -326,6 +361,178 @@ macro_rules! flog {
             Ok(())
         }
     }};
+}
+
+/// IMPLEMENTATION DETAIL; DO NOT USE
+#[doc(hidden)]
+#[derive(PartialEq, PartialOrd)]
+pub enum Level {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+/// IMPLEMENTATION DETAIL; DO NOT USE
+#[doc(hidden)]
+pub fn is_enabled(lvl: Level) -> bool {
+    if let Some(threshold) = selected_log_level() {
+        lvl <= threshold
+    } else {
+        // off
+        false
+    }
+}
+
+fn selected_log_level() -> Option<Level> {
+    if cfg!(debug_assertions) {
+        // 'dev' profile
+        if cfg!(feature = "max_level_off") {
+            return None;
+        }
+
+        if cfg!(feature = "max_level_error") {
+            return Some(Level::Error);
+        }
+
+        if cfg!(feature = "max_level_warn") {
+            return Some(Level::Warn);
+        }
+
+        if cfg!(feature = "max_level_info") {
+            return Some(Level::Info);
+        }
+
+        if cfg!(feature = "max_level_debug") {
+            return Some(Level::Debug);
+        }
+
+        if cfg!(feature = "max_level_trace") {
+            return Some(Level::Trace);
+        }
+    } else {
+        if cfg!(feature = "release_max_level_off") {
+            return None;
+        }
+
+        if cfg!(feature = "release_max_level_error") {
+            return Some(Level::Error);
+        }
+
+        if cfg!(feature = "release_max_level_warn") {
+            return Some(Level::Warn);
+        }
+
+        if cfg!(feature = "release_max_level_info") {
+            return Some(Level::Info);
+        }
+
+        if cfg!(feature = "release_max_level_debug") {
+            return Some(Level::Debug);
+        }
+
+        if cfg!(feature = "release_max_level_trace") {
+            return Some(Level::Trace);
+        }
+    }
+
+    Some(Level::Trace)
+}
+
+/// Returns `true` if the specified logging level is statically enabled
+///
+/// Valid arguments are: `Error`, `Warn`, `Info`, `Debug` and `Trace`
+#[macro_export]
+macro_rules! log_enabled {
+    ($e:expr) => {{
+        $crate::is_enabled($crate::Level::$e)
+    }}
+}
+
+/// Logs a string at the 'Error' logging level
+///
+/// Syntax matches `uwriteln!` minus the first argument. You need to depend on the `ufmt` crate to
+/// use this macro.
+///
+/// NOTE a newline is always appended at the end
+#[macro_export]
+macro_rules! error {
+    ($($tt:tt)*) => {{
+        if $crate::is_enabled($crate::Level::Error) {
+            $crate::_flog!($($tt)*)
+        } else {
+            Ok(())
+        }
+    }}
+}
+
+/// Logs a string at the 'Warn' logging level
+///
+/// Syntax matches `uwriteln!` minus the first argument. You need to depend on the `ufmt` crate to
+/// use this macro.
+///
+/// NOTE a newline is always appended at the end
+#[macro_export]
+macro_rules! warn {
+    ($($tt:tt)*) => {{
+        if $crate::is_enabled($crate::Level::Warn) {
+            $crate::_flog!($($tt)*)
+        } else {
+            Ok(())
+        }
+    }}
+}
+
+/// Logs a string at the 'Info' logging level
+///
+/// Syntax matches `uwriteln!` minus the first argument. You need to depend on the `ufmt` crate to
+/// use this macro.
+///
+/// NOTE a newline is always appended at the end
+#[macro_export]
+macro_rules! info {
+    ($($tt:tt)*) => {{
+        if $crate::is_enabled($crate::Level::Info) {
+            $crate::_flog!($($tt)*)
+        } else {
+            Ok(())
+        }
+    }}
+}
+
+/// Logs a string at the 'Debug' logging level
+///
+/// Syntax matches `uwriteln!` minus the first argument. You need to depend on the `ufmt` crate to
+/// use this macro.
+///
+/// NOTE a newline is always appended at the end
+#[macro_export]
+macro_rules! debug {
+    ($($tt:tt)*) => {{
+        if $crate::is_enabled($crate::Level::Debug) {
+            $crate::_flog!($($tt)*)
+        } else {
+            Ok(())
+        }
+    }}
+}
+
+/// Logs a string at the 'Trace' logging level
+///
+/// Syntax matches `uwriteln!` minus the first argument. You need to depend on the `ufmt` crate to
+/// use this macro.
+///
+/// NOTE a newline is always appended at the end
+#[macro_export]
+macro_rules! trace {
+    ($($tt:tt)*) => {{
+        if $crate::is_enabled($crate::Level::Trace) {
+            $crate::_flog!($($tt)*)
+        } else {
+            Ok(())
+        }
+    }}
 }
 
 /// A drain retrieves the data written into a `Logger`
@@ -339,6 +546,16 @@ pub struct Drain {
 impl Drain {
     /// The drain endpoint of each ring buffer, highest priority first
     pub fn get_all() -> &'static [Self] {
+        if cfg!(not(cortex_m)) {
+            return &[];
+        }
+
+        if (cfg!(debug_assertions) && cfg!(feature = "max_level_off"))
+            || cfg!(feature = "release_max_level_off")
+        {
+            return &[];
+        }
+
         // NOTE The expansion of `funnel!` declares `__funnel_drains` as a function with signature
         // `fn() -> &'static [&'static Inner<[u8]>]` so here we are implicitly transmuting `&'static
         // Inner<[u8]>` into `Drain` but this should be fine because they are equivalent due to
