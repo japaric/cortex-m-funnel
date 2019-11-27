@@ -8,7 +8,7 @@ logger never waits for an I/O transfer (e.g. ITM, UART, etc.) to complete)
 
 Status: ☢️ **Experimental** ☢️ (ALPHA PRE-RELEASE)
 
-## [Documentation](https://japaric.github.io/cortex-m-funnel/funnel)
+## [Documentation](https://docs.rs/cortex-m-funnel)
 
 ## License
 
