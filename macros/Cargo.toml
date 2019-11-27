@@ -1,7 +1,13 @@
 [package]
 authors = ["Jorge Aparicio <jorge@japaric.io>"]
+categories = ["embedded", "no-std"]
+description = "A lock-free, wait-free, block-free logger for the ARM Cortex-M architecture"
+documentation = "https://docs.rs/cortex-m-funnel"
 edition = "2018"
+keywords = ["ARM", "Cortex-M", "logging", "log"]
+license = "MIT OR Apache-2.0"
 name = "cortex-m-funnel-macros"
+repository = "https://github.com/japaric/cortex-m-funnel"
 version = "0.1.0-alpha.1"
 
 [lib]
