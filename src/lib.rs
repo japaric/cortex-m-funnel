@@ -263,7 +263,7 @@ impl Logger {
 
             if icsr == 0 {
                 // thread mode
-                None
+                __funnel_logger(0)
             } else if icsr < 16 {
                 // TODO do something about exceptions -- NMI and HardFault are annoying because they
                 // have exceptional priorities

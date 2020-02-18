@@ -9,12 +9,16 @@ use lm3s6965::{interrupt, Interrupt};
 use panic_never as _;
 
 funnel!(NVIC_PRIO_BITS = 3, {
+    0: 32,
     1: 32,
     2: 64,
 });
 
 #[entry]
 fn main() -> ! {
+
+    info!("Idle thread");
+
     let mut itm = if let Some(p) = cortex_m::Peripherals::take() {
         unsafe {
             let mut nvic = p.NVIC;
