@@ -45,7 +45,7 @@ fn main(input: Input) -> parse::Result<TokenStream> {
 
     let mut map = BTreeMap::new();
     for kv in &input.map {
-        let k = lit2ux(&kv.priority, Some(1..=upper))?;
+        let k = lit2ux(&kv.priority, Some(0..=upper))?;
         let v: usize = lit2ux(&kv.size, Some(1..=usize::max_value()))?;
 
         if map.contains_key(&k) {
